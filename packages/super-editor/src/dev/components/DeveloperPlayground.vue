@@ -2,7 +2,7 @@
 import '@/style.css';
 import '@harbour-enterprises/common/styles/common-styles.css';
 
-import { ref, shallowRef, computed, onMounted } from 'vue';
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount } from 'vue';
 import { NMessageProvider } from 'naive-ui';
 import { SuperEditor } from '@/index.js';
 import { getFileObject } from '@harbour-enterprises/common/helpers/get-file-object';
@@ -12,6 +12,7 @@ import { PaginationPluginKey } from '@extensions/pagination/pagination-helpers.j
 import BasicUpload from './BasicUpload.vue';
 import BlankDOCX from '@harbour-enterprises/common/data/blank.docx?url';
 import { Telemetry } from '@harbour-enterprises/common/Telemetry.js';
+import { useAutocomplete, getAutocompleteEndpoint } from '@/composables/use-autocomplete.js';
 
 // Import the component the same you would in your app
 let activeEditor;
@@ -25,11 +26,43 @@ const contentInput = ref('');
 const contentType = ref('html');
 const isInjectingContent = ref(false);
 
+// Autocomplete configuration
+const autocompleteEndpoint = ref(getAutocompleteEndpoint());
+const useAutocompleteFeature = ref(false);
+
+// Initialize autocomplete composable
+const {
+  ghostText,
+  isGhostTextActive,
+  autocompleteStatus,
+  initializeAutocomplete,
+  cleanup: cleanupAutocomplete,
+} = useAutocomplete();
+
 const handleNewFile = async (file) => {
   currentFile.value = null;
   const fileUrl = URL.createObjectURL(file);
   currentFile.value = await getFileObject(fileUrl, file.name, file.type);
 };
+
+// API call function for autocomplete
+function buildAutocompleteApiCall(endpoint) {
+  return async function (inputText) {
+    if (!endpoint) throw new Error('No autocomplete API endpoint set.');
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: inputText }),
+    });
+    if (!res.ok) throw new Error('Autocomplete API error: ' + res.status);
+    const data = await res.json();
+    return data.completion || data.text || inputText;
+  };
+}
+const callAutocompleteAPIFunction = buildAutocompleteApiCall(autocompleteEndpoint.value);
 
 const onCreate = ({ editor }) => {
   console.debug('[Dev] Editor created', editor);
@@ -48,6 +81,12 @@ const onCreate = ({ editor }) => {
     }
   });
   attachAnnotationEventHandlers();
+
+  // Initialize autocomplete with the editor
+  initializeAutocomplete(editor, {
+    apiCallFunction: callAutocompleteAPIFunction,
+    enabled: useAutocompleteFeature,
+  });
 
   // Set debugging pagination value from editor plugin state
   isDebuggingPagination.value = PaginationPluginKey.getState(editor.state)?.isDebugging;
@@ -125,7 +164,41 @@ const debugPageStyle = computed(() => {
   };
 });
 
-const injectContent = () => {
+const callAutocompleteAPI = async (inputText) => {
+  if (!autocompleteEndpoint.value) {
+    throw new Error('Autocomplete endpoint not configured');
+  }
+
+  autocompleteStatus.value = 'Calling autocomplete API...';
+
+  try {
+    const response = await fetch(autocompleteEndpoint.value, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: inputText,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    autocompleteStatus.value = 'Autocomplete completed';
+
+    // Extract the "completion" key from the response
+    return data.completion || data.text || inputText; // fallback to original if no completion
+  } catch (error) {
+    autocompleteStatus.value = `Autocomplete failed: ${error.message}`;
+    console.error('[Dev] Autocomplete API error:', error);
+    throw error;
+  }
+};
+const injectContent = async () => {
   if (!activeEditor || !contentInput.value.trim()) {
     console.warn('[Dev] No editor instance or empty content');
     return;
@@ -133,16 +206,27 @@ const injectContent = () => {
 
   try {
     isInjectingContent.value = true;
+    autocompleteStatus.value = '';
+    let contentToInsert = contentInput.value;
 
-    // Delegate processing to the insertContent command
-    activeEditor.commands.insertContent(contentInput.value, {
-      contentType: contentType.value, // 'html', 'markdown', or 'text'
+    // If autocomplete is enabled, call the API first
+    if (useAutocompleteFeature.value) {
+      console.debug('[Dev] Calling autocomplete API with text:', contentInput.value);
+      contentToInsert = await callAutocompleteAPI(contentInput.value);
+      console.debug('[Dev] Autocomplete response:', contentToInsert);
+    }
+
+    // Insert the content (either original or autocompleted)
+    activeEditor.commands.insertContent(contentToInsert, {
+      contentType: contentType.value,
     });
 
     console.debug(`[Dev] ${contentType.value} content injected successfully`);
     contentInput.value = '';
+    autocompleteStatus.value = '';
   } catch (error) {
     console.error('[Dev] Failed to inject content:', error);
+    autocompleteStatus.value = `Error: ${error.message}`;
   } finally {
     isInjectingContent.value = false;
   }
@@ -156,6 +240,29 @@ onMounted(async () => {
     enabled: false,
     superdocId: 'dev-playground',
   });
+
+  // === Listen for production toolbar autocomplete event and sync to dev toggle ===
+  setTimeout(() => {
+    const toolbarElem = document.querySelector('.sd-toolbar');
+    if (toolbarElem && toolbarElem.__vue_app__) {
+      const toolbarVm = toolbarElem.__vue_app__._instance?.proxy?.$toolbar;
+      if (toolbarVm && toolbarVm.on) {
+        toolbarVm.on('toggle-autocomplete', ({ enabled }) => {
+          useAutocompleteFeature.value = enabled;
+          if (!activeEditor) return;
+          if (!enabled) {
+            cleanupAutocomplete();
+          }
+          // No need to re-init, the composable will watch the ref via enabled
+        });
+      }
+    }
+  }, 300);
+});
+
+onBeforeUnmount(() => {
+  // Cleanup autocomplete when component unmounts
+  cleanupAutocomplete();
 });
 </script>
 
@@ -180,18 +287,56 @@ onMounted(async () => {
                 <option value="markdown">Markdown</option>
                 <option value="text">Text</option>
               </select>
+
+              <label class="dev-app__autocomplete-toggle">
+                <button
+                  class="dev-app__autocomplete-wand"
+                  :class="{ active: useAutocompleteFeature }"
+                  @click="useAutocompleteFeature = !useAutocompleteFeature"
+                  title="Toggle Autocomplete"
+                  type="button"
+                  style="background: none; border: none; padding: 0; cursor: pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 -960 960 960">
+                    <path
+                      d="m480-280-62-138-138-62 138-63 62-137 63 137 137 63-137 62-63 138Zm0 240q-108 0-202.5-49.5T120-228v108H40v-240h240v80h-98q51 75 129.5 117.5T480-120q115 0 208.5-66T820-361l78 18q-45 136-160 219.5T480-40ZM42-520q7-67 32-128.5T143-762l57 57q-32 41-52 87.5T123-520H42Zm214-241-57-57q53-44 114-69.5T440-918v80q-51 5-97 25t-87 52Zm449 0q-41-32-87.5-52T520-838v-80q67 6 128.5 31T762-818l-57 57Zm133 241q-5-51-25-97.5T761-705l57-57q44 52 69 113.5T918-520h-80Z"
+                    />
+                  </svg>
+                </button>
+                <span>Autocomplete</span>
+              </label>
+
               <button
                 class="dev-app__inject-btn"
                 @click="injectContent"
                 :disabled="isInjectingContent || !contentInput.trim()"
               >
-                {{ isInjectingContent ? 'Injecting...' : 'Inject Content' }}
+                {{
+                  isInjectingContent
+                    ? 'Processing...'
+                    : useAutocompleteFeature
+                      ? 'Autocomplete & Inject'
+                      : 'Inject Content'
+                }}
               </button>
             </div>
+
+            <input
+              v-if="useAutocompleteFeature"
+              v-model="autocompleteEndpoint"
+              class="dev-app__autocomplete-endpoint"
+              placeholder="Autocomplete API endpoint..."
+              type="url"
+            />
+
+            <div v-if="autocompleteStatus" class="dev-app__autocomplete-status">
+              {{ autocompleteStatus }}
+            </div>
+
             <textarea
               v-model="contentInput"
               class="dev-app__content-input"
-              placeholder="Enter content to inject..."
+              :placeholder="useAutocompleteFeature ? 'Enter prompt for autocomplete...' : 'Enter content to inject...'"
               rows="3"
             ></textarea>
           </div>
@@ -374,5 +519,57 @@ onMounted(async () => {
   outline: none;
   border-color: #007bff;
   box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.dev-app__autocomplete-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dev-app__autocomplete-wand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: none;
+  transition: background-color 0.2s;
+}
+.dev-app__autocomplete-wand svg {
+  fill: #8090a8;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+}
+.dev-app__autocomplete-wand.active {
+  background-color: #e0fee3;
+}
+.dev-app__autocomplete-wand.active svg {
+  fill: #33bb42;
+}
+
+.dev-app__autocomplete-toggle input[type='checkbox'] {
+  margin: 0;
+}
+
+.dev-app__autocomplete-endpoint {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.dev-app__autocomplete-status {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  color: #6c757d;
 }
 </style>

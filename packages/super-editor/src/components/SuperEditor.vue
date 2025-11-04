@@ -4,6 +4,9 @@ import { NSkeleton, useMessage } from 'naive-ui';
 import { ref, onMounted, onBeforeUnmount, shallowRef, reactive, markRaw } from 'vue';
 import { Editor } from '@/index.js';
 import { getStarterExtensions } from '@extensions/index.js';
+import { ref as vueRef } from 'vue';
+import { useAutocomplete, getAutocompleteEndpoint } from '@/composables/use-autocomplete.js';
+import { useAddToChat } from '@/composables/use-add-to-chat.js';
 import SlashMenu from './slash-menu/SlashMenu.vue';
 import { adjustPaginationBreaks } from './pagination-helpers.js';
 import { onMarginClickCursorChange } from './cursor-helpers.js';
@@ -14,7 +17,14 @@ import { checkNodeSpecificClicks } from './cursor-helpers.js';
 import { getFileObject } from '@harbour-enterprises/common';
 import BlankDOCX from '@harbour-enterprises/common/data/blank.docx?url';
 
-const emit = defineEmits(['editor-ready', 'editor-click', 'editor-keydown', 'comments-loaded', 'selection-update']);
+const emit = defineEmits([
+  'editor-ready',
+  'editor-click',
+  'editor-keydown',
+  'comments-loaded',
+  'selection-update',
+  'add-to-chat',
+]);
 
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const props = defineProps({
@@ -39,11 +49,92 @@ const props = defineProps({
     required: false,
     default: () => ({}),
   },
-});
 
+  onAddToChat: {
+    // <-- ADD THIS PROP (for AddToChat callbacks)
+    type: Function,
+    required: false,
+    default: null,
+  },
+});
+// console.log("SuperEditor.vue props.onAddToChat", props.onAddToChat);
 const editorReady = ref(false);
 const editor = shallowRef(null);
 const message = useMessage();
+
+// --- autocomplete ghost text feature integration ---
+const autocompleteEnabled = vueRef(true); // on by default
+const autocomplete = useAutocomplete();
+
+// --- add-to-chat: selection-based floating button integration ---
+import { computed } from 'vue';
+const addToChat = useAddToChat(props.onAddToChat);
+
+// import { watch } from 'vue';
+// watch(addToChat.selectedText, (val) => {
+//   if (val) {
+//     console.log('Highlighted text:', val);
+//   }
+// });
+
+const addToChatButtonStyle = computed(() => ({
+  position: 'fixed',
+  bottom: '50px',
+  right: '50px',
+  zIndex: 2000,
+  background: '#222',
+  border: 'none',
+  color: '#fff',
+  borderRadius: '8px',
+  padding: '10px 22px',
+  fontSize: '17px',
+  fontWeight: '600',
+  cursor: 'pointer',
+  boxShadow: '0 4px 24px 2px rgba(0,0,0,0.11)',
+}));
+
+function handleAddToChatButtonClick() {
+  addToChat.addToChat((text, documentText) => {
+    console.log('[SuperEditor] handleAddToChatButtonClick received:', { text, documentText });
+    emit('add-to-chat', text, documentText);
+    if (props.onAddToChat && typeof props.onAddToChat === 'function') {
+      console.log('[SuperEditor] Calling props.onAddToChat with:', { text, documentText });
+      props.onAddToChat(text, documentText);
+    }
+    message.success('Text added to chat!');
+  });
+}
+
+// Utility: build API call function from env (or prop)
+function buildAutocompleteApiCall(endpoint, editorRef) {
+  return async function (inputText) {
+    if (!endpoint) throw new Error('No autocomplete API endpoint set.');
+
+    // Get full document context from the editor
+    let documentContext = '';
+    if (editorRef && editorRef.value && editorRef.value.view && editorRef.value.view.state) {
+      const { state } = editorRef.value.view;
+      const { doc } = state;
+      documentContext = doc.textBetween(0, doc.content.size, '\n', '\n');
+    }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: inputText,
+        document_context: documentContext,
+      }),
+    });
+    if (!res.ok) throw new Error('Autocomplete API error: ' + res.status);
+    const data = await res.json();
+    // Support both common OpenAI and generic field names
+    return data.completion || data.text || inputText;
+  };
+}
 
 const editorWrapper = ref(null);
 const editorElem = ref(null);
@@ -173,6 +264,27 @@ const initEditor = async ({ content, media = {}, mediaFiles = {}, fonts = {} } =
     ...props.options,
   });
 
+  // Enable autocomplete/ghost text with endpoint from env or override prop
+  let autocompleteApiCall = props.options.autocompleteApiCall;
+  if (!autocompleteApiCall) {
+    // Accept prop.options.autocompleteEndpoint or .env
+    let endpoint = props.options.autocompleteEndpoint || getAutocompleteEndpoint();
+    autocompleteApiCall = buildAutocompleteApiCall(endpoint, editor);
+  }
+  autocomplete.initializeAutocomplete(editor.value, {
+    enabled: autocompleteEnabled,
+    apiCallFunction: autocompleteApiCall,
+  });
+
+  // Expose autocomplete functionality on the editor instance so SuperDoc can access it
+  editor.value.autocompleteEnabled = autocompleteEnabled;
+  editor.value.triggerAutocomplete = () => {
+    autocomplete.triggerImmediateAutocomplete(autocompleteApiCall);
+  };
+
+  // --- add-to-chat: initialize composable with editor ---
+  addToChat.initializeAddToChat(editor.value);
+
   editor.value.on('paginationUpdate', () => {
     adjustPaginationBreaks(editorElem, editor);
   });
@@ -223,7 +335,7 @@ const handleSuperEditorKeydown = (event) => {
     openPopover(markRaw(LinkInput), {}, { left, top });
   }
 
-  emit('editor-keydown', { editor: editor.value });
+  emit('editor-keydown', { editor: editor.value, event });
 };
 
 const handleSuperEditorClick = (event) => {
@@ -278,6 +390,8 @@ const handleMarginChange = ({ side, value }) => {
 
 onBeforeUnmount(() => {
   stopPolling();
+  autocomplete.cleanup();
+  addToChat.cleanup();
   editor.value?.destroy();
   editor.value = null;
 });

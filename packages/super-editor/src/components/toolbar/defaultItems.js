@@ -78,6 +78,15 @@ export const makeDefaultItems = ({
     },
   });
 
+  // autocomplete (ghost text) toggle
+  const autocompleteToggle = useToolbarItem({
+    type: 'button',
+    name: 'autocomplete',
+    command: 'toggleAutocomplete',
+    icon: toolbarIcons.autocomplete,
+    tooltip: toolbarTexts.autocomplete,
+  });
+
   // ai button
   const aiButton = useToolbarItem({
     type: 'dropdown',
@@ -1078,17 +1087,23 @@ export const makeDefaultItems = ({
     undo,
     redo,
 
+    // ---- autocomplete toggle after ai and before overflow ----
+    // aiButton,
     // Dev - tracked changes
     // toggleTrackChanges,
-    acceptTrackedChangeBySelection,
-    rejectTrackedChangeOnSelection,
+    // acceptTrackedChangeBySelection,
+    // rejectTrackedChangeOnSelection,
     // toggleTrackChangesOriginal,
     // toggleTrackChangesFinal,
 
     zoom,
-    fontButton,
+    copyFormat,
+    clearFormatting,
     separator,
+    fontButton,
     fontSize,
+    separator,
+    autocompleteToggle,
     separator,
     bold,
     italic,
@@ -1096,6 +1111,8 @@ export const makeDefaultItems = ({
     strikethrough,
     colorButton,
     highlight,
+    separator,
+    linkedStyles,
     separator,
     link,
     image,
@@ -1109,15 +1126,12 @@ export const makeDefaultItems = ({
     indentRight,
     lineHeight,
     separator,
-    linkedStyles,
-    separator,
     ruler,
     pageBreakTool,
-    copyFormat,
-    clearFormatting,
+
     aiButton,
     overflow,
-    documentMode,
+    // documentMode,
   ];
 
   if (!superToolbar.config?.superdoc?.config?.modules?.ai) {
