@@ -10,4 +10,6 @@ export interface ChatContext {
   preview: string;
   /** Full selected text */
   fullText: string;
+  /** Optional full document context */
+  documentContext?: string;
 }

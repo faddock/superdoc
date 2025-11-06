@@ -111,7 +111,7 @@ export const ResizableChatPanel = ({
       {/* Main content area */}
       <div
         className={clsx(
-          'flex-1 overflow-auto transition-[width] duration-200 ease-in-out',
+          'flex-1 transition-[width] duration-200 ease-in-out',
           'min-w-0',
         )}
         style={{

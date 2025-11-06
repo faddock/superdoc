@@ -10,6 +10,7 @@ import { ref } from 'vue';
  * Manages selection state and exposes API for UI components to render
  * 'Add to Chat' button based on editor selection.
  *
+ * @param {function} onAddToChat - Callback when user clicks "Add to Chat"
  * @returns {object} showAddToChatBtn, selectedText, initializeAddToChat, cleanup, addToChat
  */
 export function useAddToChat(onAddToChat) {
@@ -115,9 +116,9 @@ export function useAddToChat(onAddToChat) {
       }
       buttonPosition.value = { left, top };
       showAddToChatFloatingBtn({ left, top, selectedText: text.trim() }, editorWrapper, (txt) => {
-        addToChat((message, documentText) => {
+        addToChat((message) => {
           if (typeof onAddToChat === 'function') {
-            onAddToChat(message, documentText);
+            onAddToChat(message);
           }
         });
         showAddToChatBtn.value = false;
@@ -183,17 +184,12 @@ export function useAddToChat(onAddToChat) {
   // Action to trigger when user presses 'add to chat' button
   /**
    * Call to trigger chat action (e.g. button click)
-   * @param {function} cb - callback with selectedText (string) and documentText (string)
+   * @param {function} cb - callback with selectedText (string) only
    */
   const addToChat = (cb /*: any */) => {
     if (showAddToChatBtn.value && selectedText.value && typeof cb === 'function') {
-      let fullDocumentText = '';
-      if (activeEditor && activeEditor.view && activeEditor.view.state) {
-        const { state } = activeEditor.view;
-        const { doc } = state;
-        fullDocumentText = doc.textBetween(0, doc.content.size, '\n', '\n');
-      }
-      cb(selectedText.value, fullDocumentText);
+      // Only pass the selected text, not the full document
+      cb(selectedText.value);
       showAddToChatBtn.value = false;
       selectedText.value = '';
       fadeout.value = false;

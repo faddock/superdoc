@@ -10,6 +10,8 @@ interface UseChatOptions {
   maxTokens?: number;
   /** Document section context */
   documentSection?: string;
+  /** Whether to include full document context in requests */
+  documentContextEnabled?: boolean;
 }
 
 interface UseChatReturn {
@@ -28,18 +30,13 @@ export const useChat = ({
   initialMessages = [],
   maxTokens = 4096,
   documentSection = '',
+  documentContextEnabled = true,
 }: UseChatOptions = {}): UseChatReturn => {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
 
   const sendMessage = useCallback(
     async (content: string, context?: ChatContext) => {
-      // If context is provided, prepend it to the user's message
-      let finalContent = content;
-      if (context) {
-        finalContent = `Context from document:\n---\n${context.fullText}\n---\n\nQuestion: ${content}`;
-      }
-
       // Add user message (display original content to user)
       const userMessage: ChatMessage = {
         id: `user-${Date.now()}`,
@@ -57,20 +54,42 @@ export const useChat = ({
 
       setIsStreaming(true);
 
+      // Add empty assistant message to show "Processing..." indicator
+      const assistantPlaceholder: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, assistantPlaceholder]);
+
       try {
         if (apiEndpoint) {
           // Convert chat history to backend API format
-          // Use the enhanced message with context for the API call
-          const apiMessages = currentMessages.slice(0, -1).map((msg) => ({
+          const apiMessages = currentMessages.map((msg) => ({
             role: msg.role,
             content: msg.content,
           }));
 
-          // Add the current message with context
-          apiMessages.push({
-            role: 'user',
-            content: finalContent,
-          });
+          // Prepare request body with document context if available
+          const requestBody: {
+            messages: { role: string; content: string }[];
+            document_section: string;
+            document_context?: string;
+            stream: boolean;
+            max_tokens: number;
+          } = {
+            messages: apiMessages,
+            document_section: context?.fullText || documentSection,
+            stream: false,
+            max_tokens: maxTokens,
+          };
+
+          // Only include document context if enabled and available
+          if (documentContextEnabled && context?.documentContext) {
+            requestBody.document_context = context.documentContext;
+          }
 
           // Make API call to backend superdoc chat endpoint
           const response = await fetch(apiEndpoint, {
@@ -79,12 +98,7 @@ export const useChat = ({
               accept: 'application/json',
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              messages: apiMessages,
-              document_section: documentSection,
-              stream: false,
-              max_tokens: maxTokens,
-            }),
+            body: JSON.stringify(requestBody),
           });
 
           if (!response.ok) {
@@ -104,36 +118,38 @@ export const useChat = ({
             responseContent = data.completion.content;
           }
 
-          // Add assistant response
-          const assistantMessage: ChatMessage = {
-            id: `assistant-${Date.now()}`,
-            role: 'assistant',
-            content: responseContent,
-            timestamp: new Date(),
-          };
-
-          setMessages((prev) => [...prev, assistantMessage]);
+          // Update the placeholder message with actual content
+          setMessages((prev) => {
+            const updated = [...prev];
+            const lastMessage = updated[updated.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              lastMessage.content = responseContent;
+            }
+            return updated;
+          });
         }
       } catch (error) {
         console.error('Error sending message:', error);
 
-        // Add error message
-        const errorMessage: ChatMessage = {
-          id: `error-${Date.now()}`,
-          role: 'assistant',
-          content:
-            error instanceof Error
-              ? `Error: ${error.message}`
-              : 'Sorry, there was an error processing your message. Please try again.',
-          timestamp: new Date(),
-        };
+        // Update the placeholder message with error content
+        const errorContent =
+          error instanceof Error
+            ? `Error: ${error.message}`
+            : 'Sorry, there was an error processing your message. Please try again.';
 
-        setMessages((prev) => [...prev, errorMessage]);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastMessage = updated[updated.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            lastMessage.content = errorContent;
+          }
+          return updated;
+        });
       } finally {
         setIsStreaming(false);
       }
     },
-    [apiEndpoint, maxTokens, documentSection],
+    [apiEndpoint, maxTokens, documentSection, documentContextEnabled],
   );
 
   const clearMessages = useCallback(() => {

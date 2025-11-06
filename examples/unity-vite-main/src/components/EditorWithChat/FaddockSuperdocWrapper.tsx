@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { SuperDoc } from 'faddock-superdoc';
 import 'faddock-superdoc/style.css';
 
@@ -14,19 +14,23 @@ type Document = {
 
 type FaddockSuperdocWrapperProps = {
   documents?: Document[];
-  onAddToChat?: (selectedText: string, documentText: string) => void;
+  onAddToChat?: (selectedText: string) => void;
+  onSuperdocReady?: (instance: SuperDoc) => void;
   [key: string]: unknown;
 };
-
 export default function FaddockSuperdocWrapper({
-  documents = [],
   onAddToChat,
   ...rest
 }: FaddockSuperdocWrapperProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const superDocInstance = useRef<SuperDoc | null>(null);
+  const onAddToChatRef = useRef(onAddToChat);
 
-  // Mount the editor ONCE on mount
+  // Update the ref when onAddToChat changes, without recreating SuperDoc
+  useEffect(() => {
+    onAddToChatRef.current = onAddToChat;
+  }, [onAddToChat]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -34,15 +38,33 @@ export default function FaddockSuperdocWrapper({
       selector: '#superdoc',
       toolbar: '#superdoc-toolbar',
       document: null,
-      autocompleteApiUrl: 'http://localhost:8080/api/v1/autocomplete',
+      // autocompleteApiUrl: 'http://localhost:58414/api/v1/autocomplete/',
+      autocompleteApiUrl: 'http://localhost:8400/api/v1/autocomplete',
       documentMode: 'editing',
       pagination: true,
       rulers: true,
-      onAddToChat,
-      ...rest,
+      onAddToChat: (selectedText: string) => {
+        // Log the selected text
+        console.log(
+          '📄 Selected text added to chat:',
+          selectedText.substring(0, 100) + '...',
+        );
+        console.log('📄 Selected text length:', selectedText.length);
+
+        // Use the ref so we always call the latest version
+        if (onAddToChatRef.current) {
+          onAddToChatRef.current(selectedText);
+        }
+      },
+      ...rest, // allow other props through
     });
 
-    // Clean up on unmount ONLY
+    // Notify parent that SuperDoc is ready
+    if (rest.onSuperdocReady && superDocInstance.current) {
+      rest.onSuperdocReady(superDocInstance.current);
+    }
+
+    // Clean up on unmount
     return () => {
       if (
         superDocInstance.current &&
@@ -50,21 +72,27 @@ export default function FaddockSuperdocWrapper({
       ) {
         superDocInstance.current.destroy();
       }
-      superDocInstance.current = null;
     };
-    // empty dependency array: mount once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div
       style={{
         width: '100%',
-        height: '75vh',
+        height: '98%',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <div id="superdoc-toolbar" style={{ width: '100%' }} />
+      <div
+        id="superdoc-toolbar"
+        style={{
+          width: '100%',
+          overflowX: 'auto',
+          overflowY: 'hidden',
+        }}
+      />
       <div
         style={{
           display: 'flex',

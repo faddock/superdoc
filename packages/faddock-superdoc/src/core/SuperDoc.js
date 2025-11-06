@@ -702,6 +702,26 @@ export class SuperDoc extends EventEmitter {
   }
 
   /**
+   * Get the full document content as plain text
+   * @returns {string} The full document text content
+   */
+  getDocumentContext() {
+    try {
+      // Get the active editor or first available editor
+      const editor = this.activeEditor || this.superdocStore.documents[0]?.getEditor();
+
+      if (editor && editor.view) {
+        return editor.view.state.doc.textContent || '';
+      }
+
+      return '';
+    } catch (error) {
+      this.#log('[superdoc] Failed to get document context:', error);
+      return '';
+    }
+  }
+
+  /**
    * Lock the current superdoc
    * @param {Boolean} isLocked
    * @param {User} lockedBy The user who locked the superdoc

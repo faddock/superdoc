@@ -1,0 +1,231 @@
+@mixin disabled {
+  opacity: var(--un-opacity-disabled);
+  pointer-events: none;
+}
+
+.root {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  background-color: var(--un-chatinput-background-color);
+  border-radius: var(--un-chatinput-border-radius);
+  border: var(--un-textinput-border-default-width)
+    var(--un-textinput-border-default-style)
+    var(--un-textinput-border-default-color);
+
+  &:hover {
+    border: var(--un-textinput-border-hover-width)
+      var(--un-textinput-border-hover-style)
+      var(--un-textinput-border-hover-color);
+  }
+
+  &:has(.textarea:focus) {
+    border-color: var(--un-textinput-border-focus-color);
+  }
+
+  &:has(.textarea:disabled) {
+    @include disabled;
+  }
+}
+
+.contextPill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--un-semantic-spacing-2);
+  border: 1px solid #94a3b8;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 3px 6px;
+  max-width: 100%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.contextText {
+  font-size: 11px;
+  color: var(--un-color-neutral-600);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contextCloseButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--un-color-neutral-600);
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--un-color-neutral-800);
+  }
+
+  &:focus {
+    outline: 2px solid var(--un-color-primary-600);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+}
+
+.toggleContainer {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-radius: var(--un-border-radius-small);
+
+  &:hover {
+    background-color: #f1f5f9;
+  }
+
+  &:focus {
+    outline: 2px solid var(--un-color-primary-600);
+    outline-offset: 2px;
+  }
+
+  &:active {
+    background-color: #e2e8f0;
+  }
+}
+
+.toggleButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--un-color-neutral-600);
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+  pointer-events: none;
+
+  &[data-enabled='true'] {
+    color: var(--un-color-primary-600);
+
+    .toggleContainer:hover & {
+      color: var(--un-color-primary-700);
+    }
+  }
+
+  &[data-enabled='false'] {
+    color: var(--un-color-neutral-400);
+    opacity: 0.6;
+  }
+}
+
+.toggleLabel {
+  font-size: 11px;
+  font-weight: var(--un-typography-caption-font-weight);
+  line-height: 1.4;
+  color: var(--un-color-neutral-600);
+  white-space: nowrap;
+  user-select: none;
+  transition: color 0.2s ease;
+  pointer-events: none;
+
+  &[data-enabled='true'] {
+    color: var(--un-color-primary-600);
+    font-weight: var(--un-typography-body-font-weight-semibold);
+
+    .toggleContainer:hover & {
+      color: var(--un-color-primary-700);
+    }
+  }
+
+  &[data-enabled='false'] {
+    color: var(--un-color-neutral-400);
+    opacity: 0.6;
+  }
+}
+
+/* For modern browsers (Chrome, Edge, etc.) */
+.textareaContainer {
+  padding-block: var(--un-textinput-input-space-vertical);
+  padding-inline: calc(var(--un-textinput-space-horizontal) / 2);
+
+  &:not(:has(.textarea:disabled)) {
+    cursor: text;
+  }
+
+  // This auto-expanding textarea approach comes from https://chriscoyier.net/2023/09/29/css-solves-auto-expanding-textareas-probably-eventually/
+  /* easy way to plop the elements on top of each other and have them both
+  sized based on the tallest one's height */
+  display: grid;
+
+  &::after {
+    /* Note the weird space! Needed to prevent jumpy behavior */
+    content: attr(data-replicated-value) ' ';
+
+    /* Hidden from view, clicks, and screen readers */
+    visibility: hidden;
+  }
+
+  .textarea,
+  &::after {
+    /* Identical styling required!! */
+    max-height: calc(1lh * var(--max-rows));
+    min-height: calc(1lh * var(--min-rows));
+    box-sizing: content-box;
+    resize: none;
+    border: none;
+    outline: none;
+    scrollbar-width: thin;
+    overflow: auto;
+    padding-block: 0;
+    padding-inline: calc(var(--un-textinput-space-horizontal) / 2);
+    font-size: var(--un-textinput-typography-font-size);
+    font-family: var(--un-textinput-typography-font-family);
+    font-weight: var(--un-textinput-typography-font-weight);
+    line-height: var(--un-textinput-typography-line-height);
+    letter-spacing: var(--un-textinput-typography-letter-spacing);
+    color: var(--un-textinput-color-default);
+
+    /* This is how textarea text behaves */
+    white-space: pre-wrap;
+    word-break: break-word;
+
+    /* Place on top of each other */
+    grid-area: 1 / 1 / 2 / 2;
+  }
+}
+
+.textarea {
+  // TODO: When modern browsers support the field-sizing property, we can remove the grid display hack and just use this one liner.
+  field-sizing: content;
+  background-color: transparent;
+
+  &:disabled {
+    background-color: unset;
+  }
+
+  &::placeholder {
+    color: var(--un-textinput-color-placeholder);
+  }
+}
+
+.bottom {
+  padding: var(--un-textarea-bottom-space-vertical-top)
+    var(--un-textarea-bottom-space-horizontal)
+    var(--un-textarea-bottom-space-vertical-bottom);
+  display: flex;
+  align-items: center;
+
+  // Ensure the child div with buttons uses the full width
+  > div {
+    width: 100%;
+  }
+}
